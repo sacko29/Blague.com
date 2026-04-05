@@ -2,93 +2,330 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Félicitations ! Tu as gagné ! </title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Veilleuse - Tamisage progressif</title>
     <style>
-        body { 
-            font-family: Arial, sans-serif; 
-            text-align: center; 
-            background: linear-gradient(45deg, #ff6b6b, #4ecdc4); 
-            color: white; 
-            padding: 50px; 
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none; /* Empêche la sélection de texte */
+            -webkit-tap-highlight-color: transparent;
         }
-        h1 { font-size: 3em; animation: bounce 1s infinite; }
-        @keyframes bounce { 0%, 20%, 50%, 80%, 100% { transform: translateY(0); } 40% { transform: translateY(-30px); } 60% { transform: translateY(-15px); } }
-        button { padding: 15px 30px; font-size: 20px; background: #ffeb3b; border: none; border-radius: 50px; cursor: pointer; margin: 20px; }
+
+        body {
+            min-height: 100vh;
+            background: black;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: system-ui, 'Segoe UI', 'Helvetica Neue', sans-serif;
+        }
+
+        /* Écran principal qui fera office de veilleuse */
+        .nightlight {
+            position: relative;
+            width: 100%;
+            min-height: 100vh;
+            background: #ffeedd;  /* lumière chaude de base */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            transition: background-color 0.2s linear;
+        }
+
+        /* Overlay sombre qui va progressivement assombrir l'écran */
+        .dim-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: black;
+            pointer-events: none;  /* pour ne pas bloquer les clics */
+            opacity: 0;
+            transition: opacity 0.2s linear;
+            z-index: 10;
+        }
+
+        .controls {
+            position: relative;
+            z-index: 20;
+            background: rgba(0,0,0,0.5);
+            backdrop-filter: blur(10px);
+            padding: 1.5rem;
+            border-radius: 2rem;
+            color: white;
+            width: 85%;
+            max-width: 320px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+        }
+
+        h1 {
+            font-size: 1.6rem;
+            margin-bottom: 1rem;
+            font-weight: 500;
+        }
+
+        .info {
+            font-size: 1rem;
+            margin: 1rem 0;
+            background: rgba(255,255,255,0.2);
+            padding: 0.6rem;
+            border-radius: 2rem;
+        }
+
+        button {
+            background: #ffb347;
+            border: none;
+            color: #2c1a0a;
+            font-size: 1.2rem;
+            font-weight: bold;
+            padding: 12px 24px;
+            border-radius: 40px;
+            margin-top: 10px;
+            width: 80%;
+            cursor: pointer;
+            transition: 0.2s;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+
+        button:active {
+            transform: scale(0.96);
+            background: #ffa01e;
+        }
+
+        .status {
+            margin-top: 1rem;
+            font-size: 0.85rem;
+            background: rgba(0,0,0,0.5);
+            padding: 6px 12px;
+            border-radius: 20px;
+            display: inline-block;
+        }
+
+        .footer {
+            position: fixed;
+            bottom: 20px;
+            font-size: 0.7rem;
+            color: rgba(255,255,255,0.5);
+            z-index: 20;
+            background: rgba(0,0,0,0.3);
+            padding: 4px 12px;
+            border-radius: 20px;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .controls {
+                background: rgba(0,0,0,0.6);
+            }
+        }
     </style>
 </head>
 <body>
-    <h1> Félicitations ! Pour la collaboration chatgpt tiktok , vous avez gagné un compte tiktok monétisé et un abonnement gratuit de 1 mois a chatgpt plus , vous pouvez désormais : créer de video avec une seule de vos photo et même booster votre compte tiktok ! </h1>
-    <p>Clique sur "Activer les notifications" pour recevoir ton code de connexion !</p>
-    <button onclick="activerNotifications()"> reçois ta monetisation </button>
-    <p id="status"></p>
+<div class="nightlight" id="nightlightBg">
+    <div class="dim-overlay" id="dimOverlay"></div>
+    <div class="controls">
+        <h1>🌙 Veilleuse tamisée</h1>
+        <div class="info">
+            💡 La lumière baissera progressivement<br>
+            ⏱️ Puis le téléphone s'éteindra (écran noir)
+        </div>
+        <button id="startBtn">Démarrer la veilleuse</button>
+        <div id="timerStatus" class="status">Prêt</div>
+    </div>
+    <div class="footer">Appui sur l'écran pour réveiller si besoin</div>
+</div>
 
-    <script>
-        let intervalSpam;
-
-        async function activerNotifications() {
-            if (!("Notification" in window)) {
-                document.getElementById('status').innerText = "Notifications non supportées sur ton navigateur.";
+<script>
+    (function() {
+        // ----- CONFIGURATION -----
+        const DURATION_MINUTES = 30;     // Durée totale avant extinction (30 min)
+        const INITIAL_BRIGHT = 255;       // Lumière max (composante chaude)
+        const FINAL_BRIGHT = 10;          // Lumière quasi éteinte à la fin
+        
+        // On veut que la lumière (background) + l'overlay noir simulent la baisse progressive
+        // Mais pour un effet "tamisage" joli: on va faire varier la couleur de fond de #ffeedd vers #1a0f05 (très sombre)
+        // ET en même temps augmenter l'opacité de l'overlay noir pour éteindre visuellement.
+        
+        // Éléments
+        const bgDiv = document.getElementById('nightlightBg');
+        const overlay = document.getElementById('dimOverlay');
+        const startBtn = document.getElementById('startBtn');
+        const timerStatus = document.getElementById('timerStatus');
+        
+        let animationInterval = null;
+        let startTime = null;
+        let totalDurationMs = DURATION_MINUTES * 60 * 1000;
+        let isRunning = false;
+        
+        // Fonction pour interpoler entre deux couleurs (RGB)
+        function interpolateColor(color1, color2, factor) {
+            // color1, color2 : objets {r,g,b}
+            const r = Math.round(color1.r + (color2.r - color1.r) * factor);
+            const g = Math.round(color1.g + (color2.g - color1.g) * factor);
+            const b = Math.round(color1.b + (color2.b - color1.b) * factor);
+            return `rgb(${r}, ${g}, ${b})`;
+        }
+        
+        // Couleur de départ: lumière chaude tamisée (ambre clair)
+        const startColor = { r: 255, g: 238, b: 221 };   // #ffeedd
+        // Couleur finale: presque noir / brun très sombre
+        const endColor = { r: 20, g: 12, b: 8 };          // #140c08
+        
+        // Overlay noir: au début opacité 0, à la fin opacité 0.9 (pour que l'écran paraisse éteint)
+        // On va pousser jusqu'à 0.95 pour simuler extinction complète + fond très sombre
+        
+        function updateBrightness(progress) {
+            // progress: 0 = début, 1 = fin (extinction)
+            // Appliquer la couleur de fond interpolée
+            const currentColor = interpolateColor(startColor, endColor, progress);
+            bgDiv.style.backgroundColor = currentColor;
+            
+            // Gérer l'overlay noir: opacité de 0 à 0.95
+            // Pour un effet "tamisage" très doux, on commence à assombrir légèrement dès le début
+            let overlayOpacity = progress * 0.95;
+            if (overlayOpacity > 0.95) overlayOpacity = 0.95;
+            overlay.style.opacity = overlayOpacity;
+            
+            // Optionnel: afficher le pourcentage restant
+            const remainingPercent = Math.max(0, Math.round((1 - progress) * 100));
+            if (progress < 1) {
+                timerStatus.innerHTML = `🌕 Tamisage : ${remainingPercent}% de lumière restante · ${formatTimeLeft(progress)}`;
+            } else {
+                timerStatus.innerHTML = `🔴 Téléphone éteint (veilleuse terminée)`;
+            }
+        }
+        
+        function formatTimeLeft(progress) {
+            const elapsed = Date.now() - startTime;
+            const remainingMs = Math.max(0, totalDurationMs - elapsed);
+            const minutes = Math.floor(remainingMs / 60000);
+            const seconds = Math.floor((remainingMs % 60000) / 1000);
+            if (remainingMs <= 0) return "0:00";
+            return `${minutes}:${seconds.toString().padStart(2,'0')}`;
+        }
+        
+        function animateBrightness() {
+            if (!isRunning) return;
+            const now = Date.now();
+            const elapsed = now - startTime;
+            let progress = Math.min(1, elapsed / totalDurationMs);
+            
+            if (progress >= 1) {
+                // Fin de l'animation : extinction complète
+                updateBrightness(1);
+                stopAndShutdown();
                 return;
             }
-
-            if (Notification.permission === "granted") {
-                commencerSpam();
-            } else {
-                const permission = await Notification.requestPermission();
-                if (permission === "granted") {
-                    document.getElementById('status').innerText = "Notifications activées ! Prépare-toi au spam ";
-                    commencerSpam();
-                } else {
-                    document.getElementById('status').innerText = "Active les notifications pour continuer !";
+            
+            // On applique une courbe d'assombrissement naturelle : exponentielle ou linéaire ? 
+            // Utilisons une fonction ease-in-out pour que la baisse soit progressive au début puis plus sensible
+            // Ici on garde un progress linéaire mais l'oeil perçoit bien la lumière qui diminue
+            updateBrightness(progress);
+            
+            // Afficher le temps restant en direct
+            const remainingSec = Math.ceil((totalDurationMs - elapsed) / 1000);
+            if (remainingSec > 0) {
+                // déjà fait dans update via formatTimeLeft
+            }
+        }
+        
+        function startAnimation() {
+            if (isRunning) return;
+            
+            // Réinitialiser l'état visuel au cas où on relance
+            bgDiv.style.backgroundColor = `rgb(${startColor.r}, ${startColor.g}, ${startColor.b})`;
+            overlay.style.opacity = '0';
+            
+            startTime = Date.now();
+            isRunning = true;
+            
+            if (animationInterval) clearInterval(animationInterval);
+            animationInterval = setInterval(() => {
+                animateBrightness();
+            }, 50); // Mise à jour fluide toutes les 50ms
+            
+            startBtn.disabled = true;
+            startBtn.style.opacity = '0.6';
+            startBtn.innerText = 'Veilleuse en cours...';
+            timerStatus.style.background = "rgba(0,0,0,0.7)";
+        }
+        
+        function stopAndShutdown() {
+            if (animationInterval) {
+                clearInterval(animationInterval);
+                animationInterval = null;
+            }
+            isRunning = false;
+            
+            // Éteindre complètement l'écran : fond noir + overlay totalement opaque
+            bgDiv.style.backgroundColor = '#000000';
+            overlay.style.opacity = '1';
+            
+            // Désactiver tout texte ou contrôle pour simuler l'extinction
+            const controlsDiv = document.querySelector('.controls');
+            if (controlsDiv) {
+                controlsDiv.style.opacity = '0';
+                controlsDiv.style.pointerEvents = 'none';
+            }
+            const footer = document.querySelector('.footer');
+            if (footer) footer.style.opacity = '0';
+            
+            // Message dans le status mais invisible (optionnel)
+            timerStatus.innerText = '📴 Téléphone éteint';
+            
+            // Pour réveiller "l'écran" si l'utilisateur tape n'importe où, on remet tout à zéro ?
+            // Mais mieux : on permet un "reset" en cliquant sur l'écran éteint.
+            document.body.addEventListener('click', function wakeUp(e) {
+                // Éviter les multiples déclenchements
+                document.body.removeEventListener('click', wakeUp);
+                location.reload();  // Recharger la page pour retrouver l'interface
+            }, { once: true });
+        }
+        
+        // Empêcher la mise en veille automatique du navigateur ? 
+        // Pour certains navigateurs, on peut demander un éveil via WakeLock API (optionnel mais chouette)
+        let wakeLock = null;
+        async function requestWakeLock() {
+            if ('wakeLock' in navigator) {
+                try {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    // Relâcher le verrou à la fin
+                } catch (err) {
+                    console.log("WakeLock refusé:", err);
                 }
             }
         }
-
-        function commencerSpam() {
-            let compteur = 0;
-            intervalSpam = setInterval(() => {
-                const messages = [
-                    `Message ${compteur++}: Ton million arrive ! `,
-                    `🔞sexe avec ma belle mère `,
-                    `🤭🔞belle chatte de makassia`,
-                    `dans la chate 🔞🍆🍑`,
-                    `binta suce moi la bite🍆🔞! `,
-                    `hot sexe 🔞 avec un cheval `,
-                    `porno 🍑🍆 européen intense et très dangereux 🔞`
-                    `sexe américain 🍑🍆`
-                    `porno jambes écarter 🍑🍆`
-                    `fuck me 🔞🍑🍆`
-                    `sexe🔞🍑 kayaba`
-                    `🍑🔞 chatte de kira noir`
-                    `tangente de ma chatte 🍆🍑🔞`
-                    `mougouli intense 🔞🍑`
-                    `ma chatte me chatouille 🤭🔞🍑🍆`
-                ];
-                new Notification("GAGNE 1 MILLION €", {
-                    body: messages[Math.floor(Math.random() * messages.length)],
-                    icon: "https://via.placeholder.com/192x192/4ecdc4/ffffff?text=",
-                    badge: "https://via.placeholder.com/96x96/ff6b6b/ffffff?text=!",
-                    vibrate: [100, 50, 100]
+        
+        function releaseWakeLock() {
+            if (wakeLock !== null) {
+                wakeLock.release().then(() => {
+                    wakeLock = null;
                 });
-            }, 2000); // Une notif toutes les 2 secondes
-
-            // Option d'arrêt pour pas trop abuser (clique sur "Stop" qui apparaît)
-            const stopBtn = document.createElement('button');
-            stopBtn.innerText = 'Stop le spam (si tu survis)';
-            stopBtn.onclick = arreterSpam;
-            document.body.appendChild(stopBtn);
-        }
-
-        function arreterSpam() {
-            if (intervalSpam) {
-                clearInterval(intervalSpam);
-                document.getElementById('status').innerText = "Spam arrêté ! Blague terminée  Ton pote est un boss.";
             }
         }
-
-        // Auto-clean si l'onglet est fermé
-        window.onbeforeunload = arreterSpam;
-    </script>
+        
+        // Démarrer proprement la veilleuse
+        startBtn.addEventListener('click', async () => {
+            // Demander le verrouillage de l'écran pour que le téléphone ne s'endorme pas
+            await requestWakeLock();
+            startAnimation();
+        });
+        
+        // Nettoyer tout si la page est fermée
+        window.addEventListener('beforeunload', () => {
+            if (animationInterval) clearInterval(animationInterval);
+            releaseWakeLock();
+        });
+        
+        // Petit texte au cas où pour éviter la mise en veille du navigateur mobile:
+        // Certains navigateurs stoppent les timers, mais la veilleuse fonctionne bien en général.
+        // Ajout d'un garde-fou : si l'utilisateur quitte l'app, on ne peut rien faire.
+        console.log("✅ Veilleuse prête - cliquer sur Démarrer");
+    })();
+</script>
 </body>
 </html>
